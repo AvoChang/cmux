@@ -2532,6 +2532,128 @@ final class cmuxUITests: XCTestCase {
         add(attachment)
     }
 
+    /// Verification-only coverage for a live geometry change. The prompt and
+    /// keyboard focus must survive controller resizing instead of mounting a
+    /// fresh composer presentation.
+    @MainActor
+    func testTaskComposerSurvivesRotationWithoutRemounting() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = launchApp(mockData: false, environment: [
+            "CMUX_UITEST_TASK_COMPOSER_PREVIEW": "1",
+        ])
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+
+        let prompt = taskComposerPrompt(in: app)
+        let keyboard = app.keyboards.firstMatch
+        let accessoryBar = app.otherElements["MobileTaskComposerAccessoryBar"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 8))
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        XCTAssertTrue(accessoryBar.waitForExistence(timeout: 3))
+
+        prompt.typeText("portrait-marker")
+        XCTAssertTrue((prompt.value as? String)?.contains("portrait-marker") == true)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let landscape = NSPredicate { _, _ in
+            app.frame.width > app.frame.height
+                && accessoryBar.exists
+                && keyboard.exists
+        }
+        expectation(for: landscape, evaluatedWith: app)
+        waitForExpectations(timeout: 8)
+        XCTAssertTrue((prompt.value as? String)?.contains("portrait-marker") == true)
+
+        app.typeText("-landscape-marker")
+        XCTAssertTrue((prompt.value as? String)?.contains("landscape-marker") == true)
+        XCTAssertGreaterThan(
+            prompt.frame.height,
+            100,
+            "A live geometry change must keep a useful prompt canvas"
+        )
+        XCTAssertLessThanOrEqual(
+            accessoryBar.frame.maxY,
+            keyboard.frame.minY,
+            "The resized composer must keep its dock above the keyboard"
+        )
+
+        XCUIDevice.shared.orientation = .portrait
+        let portrait = NSPredicate { _, _ in
+            app.frame.height > app.frame.width
+                && accessoryBar.exists
+                && keyboard.exists
+        }
+        expectation(for: portrait, evaluatedWith: app)
+        waitForExpectations(timeout: 8)
+        app.typeText("-restored-marker")
+        let finalValue = try XCTUnwrap(prompt.value as? String)
+        XCTAssertTrue(finalValue.contains("portrait-marker"))
+        XCTAssertTrue(finalValue.contains("landscape-marker"))
+        XCTAssertTrue(finalValue.contains("restored-marker"))
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "task-composer-rotation-preserves-draft-focus"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    /// A floating iPad keyboard must not pull the full-width composer dock into
+    /// the prompt canvas. The dock stays at the bottom safe area while the
+    /// compact keyboard can move independently above it.
+    @MainActor
+    func testTaskComposerFloatingKeyboardKeepsFullWidthDockAtBottom() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = launchApp(mockData: false, environment: [
+            "CMUX_UITEST_TASK_COMPOSER_PREVIEW": "1",
+        ])
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+
+        let prompt = taskComposerPrompt(in: app)
+        let keyboard = app.keyboards.firstMatch
+        let accessoryBar = app.otherElements["MobileTaskComposerAccessoryBar"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 8))
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        XCTAssertTrue(accessoryBar.waitForExistence(timeout: 3))
+        let dockedKeyboardWidth = keyboard.frame.width
+
+        keyboard.pinch(withScale: 0.35, velocity: -4)
+
+        let keyboardFloated = NSPredicate { _, _ in
+            let frame = keyboard.frame
+            return keyboard.exists
+                && frame.width < dockedKeyboardWidth * 0.75
+                && frame.minY < accessoryBar.frame.minY - 40
+        }
+        expectation(for: keyboardFloated, evaluatedWith: keyboard)
+        waitForExpectations(timeout: 8)
+
+        XCTAssertGreaterThan(
+            accessoryBar.frame.minY,
+            app.frame.height * 0.75,
+            "The full-width dock followed the floating keyboard into the canvas"
+        )
+        XCTAssertGreaterThan(
+            prompt.frame.height,
+            app.frame.height * 0.6,
+            "The floating keyboard collapsed the prompt canvas"
+        )
+        XCTAssertLessThanOrEqual(
+            app.frame.maxY - accessoryBar.frame.maxY,
+            40,
+            "The full-width dock must remain at the bottom safe area"
+        )
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "task-composer-floating-keyboard-keeps-bottom-dock"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     /// Accessibility text sizes must preserve a useful prompt canvas instead
     /// of allowing the persistent action to consume most of the visible sheet.
     @MainActor
