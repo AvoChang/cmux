@@ -222,6 +222,21 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
+      - name: Overlay verification-only task composer UI tests
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.device_family != 'both' && inputs.device_family != matrix.family) && github.ref_name == 'feat-verify-mpill-runtime' }}
+        env:
+          EXPECTED_PRODUCT_HEAD: 586014fe5d82ff1fdb4bb42eac65bec9192f137d
+          VERIFICATION_TEST_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_HEAD"
+          git fetch --no-tags --depth=1 origin "$VERIFICATION_TEST_REF"
+          git diff --binary HEAD FETCH_HEAD -- ios/cmuxUITests/cmuxUITests.swift | git apply
+          test "$(git diff --name-only)" = "ios/cmuxUITests/cmuxUITests.swift"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_HEAD"
+          echo "Exact product HEAD: $(git rev-parse HEAD)"
+          echo "Verification overlay: $(git diff --name-only)"
+
       - name: Select Xcode
         if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.device_family != 'both' && inputs.device_family != matrix.family) }}
         run: |
